@@ -18,7 +18,7 @@ Renders 100k+ toolpath segments at 60 FPS using GPU-accelerated vertex pipelines
 
 **Playback**
 - Step-by-step execution — Visualize the toolpath in sequence
-- Single-step forward/backward (`▶|` / `|◀`) and skip to start/end (`⏮` / `⏭`)
+- Single-step forward/backward (`|◀` / `▶|`) and skip to start/end (`⏮` / `⏭`)
 - Play / Pause (`▶` / `⏸`), auto-rewind when pressing play at the end
 - Adjustable playback speed (0.1x to 20x) and configurable segments-per-second rate
 - Loop mode — automatically restart from the beginning when reaching the end
