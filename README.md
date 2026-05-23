@@ -2,7 +2,7 @@
 
 An interactive G-code visualizer for pen plotters and 3D printers, built with Rust, egui, and wgpu.
 
-Renders 100k+ toolpath segments at 60 FPS using GPU-accelerated vertex pipelines. Supports both 2D top-down and 3D orbit views with layer-aware playback controls.
+Renders 100k+ toolpath segments at 60 FPS using GPU-accelerated vertex pipelines. Supports both 2D top-down and 3D orbit views with step-by-step playback controls.
 
 ## Features
 
@@ -12,17 +12,17 @@ Renders 100k+ toolpath segments at 60 FPS using GPU-accelerated vertex pipelines
 
 **Visualization**
 - **2D Top-Down view** — Pan and zoom over the XY plane
-- **3D Orbit view** — Drag to orbit, scroll to zoom, with smooth perspective camera
-- **Layer coloring** — Each Z-layer is rendered in a distinct color for visual separation
-- **Travel vs draw distinction** — Travel (non-printing) moves drawn in a dimmed color
+- **3D Orbit view** — Click + drag to orbit, scroll to zoom, right-click + drag to pan
+- **Travel vs draw distinction** — Travel moves rendered in a dimmed color, drawing moves in blue
+- **Pen up/down indicator** (Plotter mode) or **layer indicator** (Printer mode) in the info panel
 
 **Playback**
 - Step-by-step execution — Visualize the toolpath in sequence
-- Play / Pause / Fast-Forward / Rewind controls
-- Adjustable playback speed
-- Layer slider — Jump directly to any Z-layer
-- Progress slider — Jump to any segment index instantly
-- Auto-rewind — Automatically restarts from the beginning when play is pressed at the end
+- Single-step forward/backward (`▶|` / `|◀`) and skip to start/end (`⏮` / `⏭`)
+- Play / Pause (`▶` / `⏸`), auto-rewind when pressing play at the end
+- Adjustable playback speed (0.1x to 20x) and configurable segments-per-second rate
+- Loop mode — automatically restart from the beginning when reaching the end
+- Progress slider — jump to any segment instantly
 
 **File handling**
 - Native file-open dialog via `rfd`
@@ -32,9 +32,9 @@ Renders 100k+ toolpath segments at 60 FPS using GPU-accelerated vertex pipelines
 **Camera controls**
 | Action | 2D View | 3D View |
 |---|---|---|
-| Pan | Click + drag | Click + drag |
+| Pan | Click + drag | Right-click + drag |
 | Zoom | Scroll | Scroll |
-| Orbit | — | Right-click + drag |
+| Orbit | — | Click + drag |
 
 - **Reset View** — Returns camera to initial position and orientation
 - **Center** — Re-centers the camera on the model centroid
@@ -42,7 +42,7 @@ Renders 100k+ toolpath segments at 60 FPS using GPU-accelerated vertex pipelines
 
 **Performance**
 - All segments uploaded to the GPU once on load
-- Layer visibility and progress culling handled entirely in the vertex shader — no CPU-side vertex re-buffering
+- Layer and progress culling handled entirely in the vertex shader — no CPU-side vertex re-buffering
 - Arc G2/G3 commands tessellated into line segments at ~0.05 rad resolution
 
 ## Requirements
@@ -75,7 +75,7 @@ cargo run --release
 1. Click **Browse** or drop a G-code file onto the window
 2. Select the machine mode — **Pen Plotter** or **3D Printer**
 3. Switch between **2D Top-Down** and **3D View** as needed
-4. Use the layer / progress sliders or Play button to step through the toolpath
+4. Use the progress slider, step buttons, or Play to explore the toolpath
 
 ## Architecture
 
@@ -90,16 +90,14 @@ src/
   │   └── state.rs         Parser state machine: G0/G1/G2/G3 processing, arc
   │                        tessellation, Z-layer grouping, unit tests
   ├── playback/
-  │   └── mod.rs           PlaybackState: speed control, play/pause toggling,
-  │                        step advancement, ffwd/rwd logic
+  │   └── mod.rs           PlaybackState: speed, loop, skip/step, play/pause
   ├── renderer/
-  │   ├── mod.rs           wgpu pipeline: vertex/index buffers, shader uniforms,
-  │                        paint callback with graceful resource recreation
-  │   └── camera.rs        Mat4 math utilities, Camera2D (orthographic),
-  │                        Camera3D (perspective orbit), look_at, reset/fit
+  │   ├── mod.rs           wgpu pipeline, vertex/uniform buffers, paint callback
+  │   └── camera.rs        Mat4 math, Camera2D (orthographic), Camera3D (orbit),
+  │                        look_at, perspective/ortho for WGPU [0,1] depth
   └── ui/
-      └── mod.rs           egui side panel and viewport, mouse interaction,
-                           native dialog, all control widgets
+      └── mod.rs           egui side panel, viewport, mouse interaction,
+                           file dialog, playback controls, status indicators
 ```
 
 ## Shaders
@@ -110,7 +108,7 @@ The GPU pipeline uses two custom WGSL shaders:
 - `layer_min` / `layer_max` — Hides layers outside the active range
 - `max_segment_index` — Implements step-by-step visibility (only segments up to the progress index are shown)
 
-**Fragment shader** — Draws each segment in its layer color, with travel moves rendered dimmed.
+**Fragment shader** — Draws each segment with drawing/travel color.
 
 ## Dependencies
 
@@ -127,7 +125,7 @@ The GPU pipeline uses two custom WGSL shaders:
 ## Key Design Decisions
 
 - **`egui-wgpu` + `Callback::new_paint_callback`** chosen over Bevy for a lighter dependency graph and direct wgpu control.
-- **Shader-based culling** avoids CPU-side vertex re-upload when the user adjusts layer or progress sliders — only the uniform buffer is updated (4 floats).
+- **Shader-based culling** avoids CPU-side vertex re-upload when the user adjusts the progress slider — only the uniform buffer is updated (4 floats).
 - **Arc tessellation** at ~0.05 rad step resolution balances smoothness and vertex count.
 - **`downlevel_webgl2_defaults()` limits** required on some hardware with only 4 max color attachments via GLES/EGL fallback.
 - **Shared state** (`Arc<RwLock<SharedState>>`) bridges egui's immediate-mode UI with wgpu's retained GPU resources.
