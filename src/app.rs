@@ -73,6 +73,7 @@ impl eframe::App for App {
             &mut self.viewport,
             &mut self.machine_mode,
             &mut self.playback,
+            &self.program,
             &mut self.file_path,
             &mut self.status,
         );
