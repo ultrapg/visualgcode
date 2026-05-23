@@ -80,25 +80,26 @@ cargo run --release
 ## Architecture
 
 ```
+Cargo.toml
 src/
-├── main.rs              Entry point, wgpu device/limits, window setup
-├── app.rs               Application state, file loading, per-frame orchestration
-├── parser/
-│   ├── types.rs         Core data types: Point3D, Segment, Layer, BoundingBox,
-│   │                    GCodeProgram, MachineMode, ViewMode
-│   └── state.rs         Parser state machine: G0/G1/G2/G3 processing, arc
-│                        tessellation, Z-layer grouping, unit tests
-├── playback/
-│   └── mod.rs           PlaybackState: speed control, play/pause toggling,
-│                        step advancement, ffwd/rwd logic
-├── renderer/
-│   ├── mod.rs           wgpu pipeline: vertex/index buffers, shader uniforms,
-│                        paint callback with graceful resource recreation
-│   └── camera.rs        Mat4 math utilities, Camera2D (orthographic),
-│                        Camera3D (perspective orbit), look_at, reset/fit
-└── ui/
-    └── mod.rs           egui side panel and viewport, mouse interaction,
-                         native dialog, all control widgets
+  ├── main.rs              Entry point, wgpu device/limits, window setup
+  ├── app.rs               Application state, file loading, per-frame orchestration
+  ├── parser/
+  │   ├── types.rs         Core data types: Point3D, Segment, Layer, BoundingBox,
+  │   │                    GCodeProgram, MachineMode, ViewMode
+  │   └── state.rs         Parser state machine: G0/G1/G2/G3 processing, arc
+  │                        tessellation, Z-layer grouping, unit tests
+  ├── playback/
+  │   └── mod.rs           PlaybackState: speed control, play/pause toggling,
+  │                        step advancement, ffwd/rwd logic
+  ├── renderer/
+  │   ├── mod.rs           wgpu pipeline: vertex/index buffers, shader uniforms,
+  │                        paint callback with graceful resource recreation
+  │   └── camera.rs        Mat4 math utilities, Camera2D (orthographic),
+  │                        Camera3D (perspective orbit), look_at, reset/fit
+  └── ui/
+      └── mod.rs           egui side panel and viewport, mouse interaction,
+                           native dialog, all control widgets
 ```
 
 ## Shaders
