@@ -68,7 +68,6 @@ impl ViewportState {
             let model_h = (b.max_y - b.min_y).max(0.001);
             let model_cx = (b.min_x + b.max_x) * 0.5;
             let model_cy = (b.min_y + b.max_y) * 0.5;
-            // zoom such that model fits with 20% margin
             let zoom_x = 20.0 * 0.8 / model_w;
             let zoom_y = 20.0 * 0.8 / model_h;
             self.camera_2d.zoom = zoom_x.min(zoom_y).max(0.01);
@@ -84,6 +83,7 @@ pub fn show_ui(
     viewport: &mut ViewportState,
     machine_mode: &mut MachineMode,
     playback: &mut PlaybackState,
+    program: &Option<parser::GCodeProgram>,
     file_path: &mut String,
     status: &mut String,
 ) -> bool {
@@ -104,7 +104,7 @@ pub fn show_ui(
             ui.separator();
             draw_playback_section(ui, playback, shared_state);
             ui.separator();
-            draw_info_section(ui, playback, status);
+            draw_info_section(ui, playback, program, *machine_mode, status);
         });
 
     let avail = ui.available_size();
@@ -157,11 +157,11 @@ fn handle_viewport_input(
                     let s = 1.0 + scroll.y * 0.05;
                     viewport.camera_2d.zoom = (viewport.camera_2d.zoom * s).clamp(0.01, 1000.0);
                 }
-                ViewMode::View3D => {
-                    let s = 1.0 + scroll.y * 0.05;
-                    viewport.camera_3d.distance =
-                        (viewport.camera_3d.distance / s).clamp(0.1, 10000.0);
-                }
+            ViewMode::View3D => {
+                let s = 1.0 + scroll.y * 0.03;
+                viewport.camera_3d.distance =
+                    (viewport.camera_3d.distance / s).clamp(0.1, 10000.0);
+            }
             }
             needs_repaint = true;
         }
@@ -176,7 +176,6 @@ fn handle_viewport_input(
                 let z = viewport.camera_2d.zoom.max(0.01);
                 let half_h = 10.0 / z;
                 let half_w = aspect * 10.0 / z;
-                // convert screen points to world units
                 let scale_x = (2.0 * half_w) / viewport_height.max(1.0);
                 let scale_y = (2.0 * half_h) / viewport_height.max(1.0);
                 viewport.camera_2d.pan[0] -= delta.x * scale_x;
@@ -185,18 +184,23 @@ fn handle_viewport_input(
             ViewMode::View3D => {
                 if primary {
                     // Orbit: drag rotates the view around the target
-                    viewport.camera_3d.yaw += delta.x * 0.008;
+                    viewport.camera_3d.yaw -= delta.x * 0.004;
                     viewport.camera_3d.pitch =
-                        (viewport.camera_3d.pitch + delta.y * 0.008).clamp(-1.5, 1.5);
+                        (viewport.camera_3d.pitch - delta.y * 0.004).clamp(-1.5, 1.5);
                 } else {
-                    // Pan: drag moves the target in screen-aligned directions
+                    // Pan: move target in screen-aligned directions (right/up)
                     let dist = viewport.camera_3d.distance.max(0.1);
-                    let scale = dist * 0.002;
-                    let cos_yaw = viewport.camera_3d.yaw.cos();
-                    let sin_yaw = viewport.camera_3d.yaw.sin();
-                    viewport.camera_3d.target[0] += (delta.x * cos_yaw + delta.y * sin_yaw) * scale;
-                    viewport.camera_3d.target[1] += (delta.x * sin_yaw - delta.y * cos_yaw) * scale;
-                    viewport.camera_3d.target[2] -= delta.y * scale * 0.3;
+                    let scale = dist * 0.001;
+                    let (sy, cy) = viewport.camera_3d.yaw.sin_cos();
+                    let (sp, cp) = viewport.camera_3d.pitch.sin_cos();
+                    let rx = -sy;
+                    let ry = cy;
+                    let ux = -cy * sp;
+                    let uy = -sy * sp;
+                    let uz = cp;
+                    viewport.camera_3d.target[0] -= (delta.x * rx - delta.y * ux) * scale;
+                    viewport.camera_3d.target[1] -= (delta.x * ry - delta.y * uy) * scale;
+                    viewport.camera_3d.target[2] -= (-delta.y) * uz * scale;
                 }
             }
         }
@@ -206,7 +210,6 @@ fn handle_viewport_input(
     needs_repaint
 }
 
-/// Returns `true` if a load was requested.
 fn draw_file_section(
     ui: &mut egui::Ui,
     file_path: &mut String,
@@ -286,14 +289,20 @@ fn draw_playback_section(
     ui.horizontal(|ui| {
         ui.add_enabled_ui(playback.total_segments > 0, |ui| {
             if ui.button("⏮").clicked() {
-                playback.rewind();
+                playback.skip_to_start();
+                playback.playing = false;
+                let mut state = shared_state.write().unwrap();
+                state.max_segment_index = playback.current_segment_index;
+                ui.ctx().request_repaint();
+            }
+            if ui.button("|◀").clicked() {
+                playback.step_backward_one();
                 let mut state = shared_state.write().unwrap();
                 state.max_segment_index = playback.current_segment_index;
                 ui.ctx().request_repaint();
             }
             let play_label = if playback.playing { "⏸" } else { "▶" };
             if ui.button(play_label).clicked() {
-                // If at the end, restart from 0
                 if !playback.playing && playback.current_segment_index >= playback.total_segments.saturating_sub(1) {
                     playback.current_segment_index = 0;
                 }
@@ -302,8 +311,15 @@ fn draw_playback_section(
                 state.max_segment_index = playback.current_segment_index;
                 ui.ctx().request_repaint();
             }
+            if ui.button("▶|").clicked() {
+                playback.step_forward_one();
+                let mut state = shared_state.write().unwrap();
+                state.max_segment_index = playback.current_segment_index;
+                ui.ctx().request_repaint();
+            }
             if ui.button("⏭").clicked() {
-                playback.fast_forward();
+                playback.skip_to_end();
+                playback.playing = false;
                 let mut state = shared_state.write().unwrap();
                 state.max_segment_index = playback.current_segment_index;
                 ui.ctx().request_repaint();
@@ -314,10 +330,14 @@ fn draw_playback_section(
     ui.horizontal(|ui| {
         ui.label("Speed:");
         ui.add(
-            egui::Slider::new(&mut playback.speed, 0.1..=10.0)
+            egui::Slider::new(&mut playback.speed, 0.1..=20.0)
                 .step_by(0.1)
                 .text("x"),
         );
+    });
+
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut playback.loop_playback, "Loop");
     });
 
     if ui
@@ -329,45 +349,20 @@ fn draw_playback_section(
     {
         let mut state = shared_state.write().unwrap();
         state.max_segment_index = playback.current_segment_index;
-        if let Some(program) = &state.program {
-            let idx = playback.current_segment_index.min(program.segments.len().saturating_sub(1) as u32) as usize;
-            if idx < program.segments.len() {
-                playback.current_layer_index = program.segments[idx].layer_index as usize;
-            }
-        }
         ui.ctx().request_repaint();
-    }
-
-    if playback.total_layers > 0 {
-        let max_layer = playback.total_layers.saturating_sub(1).max(0);
-        let mut layer_idx = playback.current_layer_index as u32;
-        if ui
-            .add(
-                egui::Slider::new(&mut layer_idx, 0..=max_layer as u32)
-                    .text("Layer"),
-            )
-            .changed()
-        {
-            playback.current_layer_index = layer_idx as usize;
-            let mut state = shared_state.write().unwrap();
-            state.layer_min = layer_idx;
-            state.layer_max = layer_idx;
-            if let Some(program) = &state.program {
-                let li = layer_idx as usize;
-                if li < program.layers.len() {
-                    let seg_start = program.layers[li].segment_start;
-                    playback.current_segment_index = seg_start as u32;
-                    state.max_segment_index = seg_start as u32;
-                }
-            }
-            ui.ctx().request_repaint();
-        }
     }
 }
 
-fn draw_info_section(ui: &mut egui::Ui, playback: &PlaybackState, status: &str) {
+fn draw_info_section(
+    ui: &mut egui::Ui,
+    playback: &PlaybackState,
+    program: &Option<parser::GCodeProgram>,
+    machine_mode: MachineMode,
+    status: &str,
+) {
     ui.label("Info");
     ui.label(status);
+
     if playback.total_segments > 0 {
         ui.label(format!("Segments: {}", playback.total_segments));
         ui.label(format!("Layers: {}", playback.total_layers));
@@ -375,5 +370,31 @@ fn draw_info_section(ui: &mut egui::Ui, playback: &PlaybackState, status: &str) 
             "Progress: {:.1}%",
             playback.progress() * 100.0
         ));
+
+        // Current segment indicator
+        if let Some(prog) = program {
+            let idx = playback.current_segment_index.min(prog.segments.len() as u32 - 1) as usize;
+            if idx < prog.segments.len() {
+                let seg = &prog.segments[idx];
+                match machine_mode {
+                    MachineMode::Printer3D => {
+                        let li = seg.layer_index as usize;
+                        if li < prog.layers.len() {
+                            let layer = &prog.layers[li];
+                            ui.label(format!(
+                                "Layer {}/{} (Z={:.2})",
+                                li + 1,
+                                prog.layers.len(),
+                                layer.z_height,
+                            ));
+                        }
+                    }
+                    MachineMode::Plotter => {
+                        let state = if seg.is_drawing { "Down" } else { "Up" };
+                        ui.label(format!("Pen {}", state));
+                    }
+                }
+            }
+        }
     }
 }
